@@ -1,0 +1,6 @@
+config.js
+for_voice.md
+.key.pem
+.cert.pem
+.DS_Store
+node_modules/
