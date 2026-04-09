@@ -17,6 +17,11 @@
   var sources = [];
   var state = 'idle';
 
+  /* ── Recording mode API ── */
+  window.neron = window.neron || {};
+  window.neron._gateAudio = false;
+  window.neron._onTranscript = null;  /* callback: function(transcript) */
+
   /* ── DOM ── */
   var micBtn = document.getElementById('micBtn');
   var micLabel = document.getElementById('micLabel');
@@ -24,7 +29,13 @@
   var toolsEl = document.getElementById('tools');
 
   /* ── Session config ── */
-  function sessionMsg() {
+  function sessionMsg(vadType) {
+    var td = vadType === null ? null : {
+      type: 'server_vad',
+      threshold: 0.5,
+      silence_duration_ms: 500,
+      prefix_padding_ms: 300
+    };
     return {
       type: 'session.update',
       session: {
@@ -44,12 +55,7 @@
           input:  { format: { type: 'audio/pcm', rate: RATE } },
           output: { format: { type: 'audio/pcm', rate: RATE } }
         },
-        turn_detection: {
-          type: 'server_vad',
-          threshold: 0.5,
-          silence_duration_ms: 500,
-          prefix_padding_ms: 300
-        },
+        turn_detection: td,
         input_audio_transcription: { model: 'grok-2-latest' },
         tools: [
           { type: 'web_search' },
@@ -75,6 +81,7 @@
      CONNECT
      ════════════════════════════════════════ */
   async function connect() {
+    if (state !== 'idle') return;
     setState('connecting');
     var key = _d(_cfg.x);
 
@@ -96,7 +103,7 @@
       ws = new WebSocket('wss://api.x.ai/v1/realtime', ['xai-client-secret.' + token]);
       ws.onopen = function () {
         console.log('[voice] Connected to xAI');
-        ws.send(JSON.stringify(sessionMsg()));
+        ws.send(JSON.stringify(sessionMsg('server_vad')));
       };
       ws.onmessage = onMessage;
       ws.onclose = function (e) {
@@ -122,25 +129,33 @@
       case 'session.created':
       case 'session.updated':
         console.log('[voice] Session ready');
-        startMic();
+        if (!micStream) startMic();
         break;
 
       case 'input_audio_buffer.speech_started':
         if (isAiSpeaking) stopPlayback();
         if (window.kimiko) window.kimiko._speaker = 'user';
-        setState('listening');
+        if (!window.neron._gateAudio) setState('listening');
         break;
 
       case 'input_audio_buffer.speech_stopped':
-        setState('thinking');
+        if (!window.neron._gateAudio) setState('thinking');
+        break;
+
+      /* ── Transcription completed ── */
+      case 'conversation.item.input_audio_transcription.completed':
+        console.log('[voice] Transcript:', msg.transcript);
+        if (window.neron._onTranscript) {
+          window.neron._onTranscript(msg.transcript || '');
+        }
         break;
 
       case 'response.output_item.added':
-        /* Tool call starting */
+        /* Suppress responses during recording/processing */
+        if (window.neron._suppressResponse) break;
         if (msg.item && msg.item.type === 'function_call') {
           showTool(msg.item.name, 'running');
         }
-        /* Audio response starting */
         var t = msg.item && (msg.item.type || msg.item.content_type);
         if (t === 'message' || t === 'audio') {
           setState('speaking');
@@ -148,17 +163,19 @@
         break;
 
       case 'response.function_call_arguments.done':
+        if (window.neron._suppressResponse) break;
         showTool(msg.name, 'done');
         break;
 
-      /* Audio deltas — handle both xAI and OpenAI-compat event names */
       case 'response.output_audio.delta':
       case 'response.audio.delta':
+        if (window.neron._suppressResponse) break;
         if (state !== 'speaking') setState('speaking');
         playChunk(msg.delta);
         break;
 
       case 'response.done':
+        if (window.neron._suppressResponse) break;
         finishResponse();
         break;
 
@@ -207,6 +224,7 @@
      MICROPHONE (AudioWorklet → PCM16)
      ════════════════════════════════════════ */
   async function startMic() {
+    if (micStream) return; /* already running */
     try {
       audioCtx = new AudioContext({ sampleRate: RATE });
 
@@ -256,7 +274,6 @@
         }
       };
 
-      /* Worklet must reach destination to process — mute via zero-gain */
       src.connect(worklet);
       var mute = audioCtx.createGain();
       mute.gain.value = 0;
@@ -350,11 +367,11 @@
      ════════════════════════════════════════ */
   var stateMap = {
     idle:       ['Tap to connect', '',   'Start Conversation', false],
-    connecting: ['Connecting…',    '',   'Connecting…',        false],
+    connecting: ['Connecting\u2026',    '',   'Connecting\u2026',        false],
     ready:      ['Connected',      'on', 'Ready',              false],
-    listening:  ['Listening',      'on', 'Listening…',         true],
-    thinking:   ['Thinking…',      '',   'Processing…',       true],
-    speaking:   ['Speaking',       'on', 'AI Speaking…',       true]
+    listening:  ['Listening',      'on', 'Listening\u2026',         true],
+    thinking:   ['Thinking\u2026',      '',   'Processing\u2026',       true],
+    speaking:   ['Speaking',       'on', 'AI Speaking\u2026',       true]
   };
 
   function setState(s) {
@@ -375,13 +392,72 @@
     audioCtx = null;
   }
 
-  /* ── Button ── */
+  /* ════════════════════════════════════════
+     RECORDING MODE API
+     ════════════════════════════════════════ */
+
+  /* Send session.update to toggle VAD on/off */
+  window.neron.setVAD = function(enabled) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      var msg = sessionMsg(enabled ? 'server_vad' : null);
+      ws.send(JSON.stringify(msg));
+      console.log('[voice] VAD ' + (enabled ? 'enabled' : 'disabled'));
+    }
+  };
+
+  /* Commit audio buffer (triggers transcription in manual mode) */
+  window.neron.commitAudio = function() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+      /* Cancel any auto-response xAI might generate from the committed audio */
+      ws.send(JSON.stringify({ type: 'response.cancel' }));
+      console.log('[voice] Audio committed + response cancelled');
+    }
+  };
+
+  window.neron.clearAudioBuffer = function() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'input_audio_buffer.clear' }));
+    }
+  };
+
+  window.neron.sendTextToGrok = async function(text) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      connect();
+      await new Promise(function(resolve) {
+        var check = setInterval(function() {
+          if (state === 'listening' || state === 'ready') {
+            clearInterval(check);
+            resolve();
+          }
+        }, 100);
+      });
+    }
+    ws.send(JSON.stringify({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: text }]
+      }
+    }));
+    ws.send(JSON.stringify({ type: 'response.create' }));
+  };
+
+  window.neron.isConnected = function() { return ws && ws.readyState === WebSocket.OPEN; };
+  window.neron.getState = function() { return state; };
+  window.neron.stopAiPlayback = function() { stopPlayback(); };
+  window.neron.connect = connect;
+
+  /* ── Button (hidden, triggered programmatically) ── */
   if (micBtn) {
     micBtn.addEventListener('click', function () {
       if (state === 'idle') connect();
-      else { if (ws) ws.close(); cleanup(); setState('idle'); }
     });
   }
+
+  /* ── Auto-connect on page load ── */
+  connect();
 
   /* ── Smooth AI level decay ── */
   (function decay() {

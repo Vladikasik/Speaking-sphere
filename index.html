@@ -306,7 +306,154 @@
       to   { opacity: 1; transform: scale(1) translateY(0); }
     }
 
-    /* ── Mic button active state ── */
+    /* ── Recording mode ── */
+    #recordingBar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      z-index: 30;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    #recordingBar.active { opacity: 1; }
+    #recordingBarFill {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #ff6a75, #ff4757);
+      border-radius: 0 2px 2px 0;
+      box-shadow: 0 0 12px rgba(255,71,87,0.5);
+    }
+    #recordingBarFill.filling {
+      width: 100%;
+      transition: width 3s linear;
+    }
+
+    #recordingHint {
+      position: fixed;
+      top: max(60px, env(safe-area-inset-top));
+      left: 20px;
+      right: 20px;
+      z-index: 25;
+      text-align: center;
+      font-size: 12px;
+      line-height: 1.5;
+      letter-spacing: 0.03em;
+      color: rgba(255,120,130,0.8);
+      opacity: 0;
+      transform: translateY(-8px);
+      transition: opacity 0.4s, transform 0.4s;
+      pointer-events: none;
+    }
+    #recordingHint.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    #transcriptDisplay {
+      position: fixed;
+      bottom: 220px;
+      left: 24px;
+      right: 24px;
+      z-index: 25;
+      text-align: center;
+      font-size: 15px;
+      color: rgba(255,255,255,0.75);
+      line-height: 1.6;
+      max-height: 35vh;
+      overflow-y: auto;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.4s;
+    }
+    #transcriptDisplay.visible { opacity: 1; }
+    #transcriptDisplay .interim {
+      color: rgba(255,255,255,0.35);
+    }
+
+    /* ── Card overlay — fullscreen on top of everything ── */
+    #cardOverlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 50;
+      background: rgba(0,0,0,0.65);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    #cardOverlay.active { display: block; }
+
+    #swipeCounter {
+      position: absolute;
+      bottom: max(36px, env(safe-area-inset-bottom));
+      left: 0; right: 0;
+      text-align: center;
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      color: rgba(255,255,255,0.3);
+      pointer-events: none;
+    }
+
+    /* Processing spinner */
+    #processingOverlay {
+      position: fixed;
+      inset: 0;
+      z-index: 25;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    #processingOverlay.active { display: flex; }
+    .processing-spinner {
+      width: 32px;
+      height: 32px;
+      border: 2px solid rgba(255,255,255,0.1);
+      border-top-color: rgba(255,120,130,0.7);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Background transition for recording mode */
+    body {
+      transition: --sphere-tint-1 0.6s, --sphere-tint-2 0.6s;
+    }
+    @property --sphere-tint-1 {
+      syntax: '<color>';
+      inherits: true;
+      initial-value: rgba(60,110,220,0.18);
+    }
+    @property --sphere-tint-2 {
+      syntax: '<color>';
+      inherits: true;
+      initial-value: rgba(30,65,160,0.14);
+    }
+
+    /* ── Fullscreen touch target ── */
+    #touchTarget {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    /* ── Floating bottom UI ── */
+    #bottomUI {
+      text-align: center;
+      pointer-events: none;
+    }
+    #bottomUI .pills { pointer-events: auto; }
+    #bottomUI .tools { pointer-events: auto; }
+
+    /* ── Mic button active state (status pill now) ── */
     .mic-active {
       border-color: rgba(77,226,167,0.55) !important;
       box-shadow:
@@ -340,12 +487,31 @@
 </head>
 <body>
 
+  <!-- Recording loading bar -->
+  <div id="recordingBar"><div id="recordingBarFill"></div></div>
+
+  <!-- Recording hint -->
+  <div id="recordingHint">Your recording a note. It would be saved in the system literally, word by word</div>
+
+  <!-- Live transcript -->
+  <div id="transcriptDisplay"></div>
+
+  <!-- Processing spinner -->
+  <div id="processingOverlay"><div class="processing-spinner"></div></div>
+
+  <!-- Card overlay -->
+  <div id="cardOverlay">
+    <div id="swipeCounter"></div>
+  </div>
+
   <!-- 3D Sphere Canvas -->
   <canvas id="sphereCanvas"></canvas>
 
-  <!-- Overlay UI -->
-  <div class="overlay">
+  <!-- Fullscreen touch target -->
+  <div id="touchTarget"></div>
 
+  <!-- Floating UI (no card, no button — just status + tools) -->
+  <div class="overlay">
     <div class="brand">
       <h1>Neron</h1>
       <p>Voice Knowledge Assistant</p>
@@ -353,49 +519,26 @@
 
     <div style="flex:1"></div>
 
-    <div style="display:flex;justify-content:center">
-      <div class="card">
-
-        <div class="pills">
-          <span class="pill" id="statusPill">Tap to connect</span>
-        </div>
-
-        <!-- Tool invocations appear here -->
-        <div class="tools" id="tools"></div>
-
-        <!-- Mic button -->
-        <button class="gl gl--primary" id="micBtn">
-          <svg id="micIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="9" y="1" width="6" height="11" rx="3"/>
-            <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
-            <line x1="12" y1="19" x2="12" y2="23"/>
-            <line x1="8" y1="23" x2="16" y2="23"/>
-          </svg>
-          <span id="micLabel">Start Conversation</span>
-        </button>
-
-        <div class="ver">v2.0.0 — Grok Voice</div>
+    <div id="bottomUI">
+      <div class="tools" id="tools"></div>
+      <div class="pills">
+        <span class="pill" id="statusPill">Tap to connect</span>
       </div>
+      <div class="ver">Hold to record a note</div>
     </div>
   </div>
 
+  <!-- Hidden mic button (voice.js binds to it, we trigger it programmatically) -->
+  <button id="micBtn" style="display:none"><span id="micLabel"></span></button>
+
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4/dist/js-yaml.min.js"></script>
   <script src="sphere.js"></script>
   <script src="config.js"></script>
   <script src="voice.js"></script>
+  <script src="cards.js"></script>
+  <script src="recording.js"></script>
 
-  <script>
-  (function() {
-    'use strict';
-    var canvas = document.getElementById('sphereCanvas');
-    if (canvas) {
-      canvas.addEventListener('pointerdown', function() {
-        if (window.kimiko && window.kimiko.spawnTapRipple) {
-          window.kimiko.spawnTapRipple();
-        }
-      }, { passive: true });
-    }
-  })();
-  </script>
+  <!-- tap ripple now handled by recording.js via #touchTarget -->
 
 </body>
 </html>
