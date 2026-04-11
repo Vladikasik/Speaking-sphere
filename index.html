@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#04060c">
+  <meta name="theme-color" content="#000000">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <!-- ╔═══════════════════════════════════════════════════════╗
        ║  CUSTOMIZE: Change title and brand name below        ║
@@ -31,18 +31,23 @@
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
     html {
-      background-color: #04060c;
+      /* background-color: #04060c; */ /* TEMP: pitch-black bg test */
+      background-color: #000;
       height: 100%;
       overflow: hidden;
     }
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      /* TEMP: pitch-black bg test — gradient tints commented out */
+      /*
       background:
         radial-gradient(ellipse 120% 90% at 75% 6%, var(--sphere-tint-1), transparent 55%),
         radial-gradient(ellipse 90% 80% at 22% 96%, var(--sphere-tint-2), transparent 55%),
         linear-gradient(168deg, #04060c, #060910 48%, #03050a);
       background-color: #04060c;
+      */
+      background: #000;
       color: var(--text);
       height: 100%;
       overflow: hidden;
@@ -56,14 +61,19 @@
       width: 100%;
       height: 100%;
       z-index: 0;
-      background-color: #04060c;
+      /* background-color: #04060c; */ /* TEMP: pitch-black bg test */
+      background-color: #000;
     }
 
-    /* ── Overlay layout ── */
+    /* ── Overlay layout ──
+       z-index must sit ABOVE #touchTarget (z-index:2) so that children with
+       pointer-events:auto (the nav) actually receive taps. The overlay root
+       itself stays pointer-events:none so non-interactive areas pass clicks
+       through to #touchTarget underneath. */
     .overlay {
       position: fixed;
       inset: 0;
-      z-index: 1;
+      z-index: 3;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -76,7 +86,8 @@
     .brand {
       text-align: center;
       padding-top: clamp(20px, 5vh, 52px);
-      pointer-events: auto;
+      /* none so the top-area long-press-to-record still reaches #touchTarget */
+      pointer-events: none;
     }
     .brand h1 {
       font-size: clamp(30px, 5vw, 46px);
@@ -452,13 +463,13 @@
       user-select: none;
     }
 
-    /* ── Floating bottom UI ── */
+    /* ── Floating bottom UI ──
+       Status pill + tools are display-only. pointer-events:none on the whole
+       block so bottom-area long-presses still reach #touchTarget for recording. */
     #bottomUI {
       text-align: center;
       pointer-events: none;
     }
-    #bottomUI .pills { pointer-events: auto; }
-    #bottomUI .tools { pointer-events: auto; }
 
     /* ── Mic button active state (status pill now) ── */
     .mic-active {
@@ -490,6 +501,236 @@
     @media (prefers-reduced-motion: reduce) {
       .gl, .gl::before, .gl::after { transition: none !important; animation: none !important; }
     }
+
+    /* ══════════════════════════════════════════
+       VIEW SWITCHING — graph | sphere | timeline
+       Single source of truth: body[data-view].
+       ══════════════════════════════════════════ */
+    #graphView, #timelineView { display: none; }
+    body[data-view="graph"]    #graphView    { display: flex; }
+    body[data-view="timeline"] #timelineView { display: block; }
+
+    /* Hide sphere canvas + recording touch target on non-sphere views */
+    body:not([data-view="sphere"]) #sphereCanvas,
+    body:not([data-view="sphere"]) #touchTarget { display: none; }
+
+    /* Hide the "Hold to record" hint on non-sphere views (status pill stays) */
+    body:not([data-view="sphere"]) .ver { visibility: hidden; }
+
+    /* ── 3-segment liquid-glass nav pill ──
+       The overlay's z-index (3) is what actually lifts this above #touchTarget.
+       Inside the overlay it just needs pointer-events:auto to capture taps. */
+    #nav {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      padding: 4px;
+      margin: 0 auto 10px;
+      width: min(320px, 88%);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      background:
+        linear-gradient(136deg, rgba(255,255,255,0.16), rgba(255,255,255,0.04) 48%, rgba(255,255,255,0.01)),
+        var(--glass-bg);
+      box-shadow:
+        0 10px 24px rgba(0,6,18,0.4),
+        inset 0 1px 0 rgba(255,255,255,0.42),
+        inset 0 -1px 0 rgba(255,255,255,0.08);
+      backdrop-filter: blur(20px) saturate(170%);
+      -webkit-backdrop-filter: blur(20px) saturate(170%);
+      pointer-events: auto;
+    }
+    .nav-seg {
+      flex: 1;
+      height: 34px;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: rgba(200,220,248,0.55);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 540;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.25s, color 0.25s, box-shadow 0.25s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .nav-seg.active {
+      background: linear-gradient(136deg, rgba(255,255,255,0.22), rgba(255,255,255,0.06) 52%, rgba(255,255,255,0.01));
+      color: var(--text);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.42),
+        inset 0 -1px 0 rgba(255,255,255,0.08),
+        0 2px 8px rgba(0,6,18,0.3);
+    }
+    .nav-seg:hover:not(.active) { color: rgba(230,242,255,0.85); }
+
+    /* ── Graph view (placeholder) ── */
+    #graphView {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    #graphView h2 {
+      font-size: clamp(48px, 12vw, 96px);
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      color: rgba(236,246,255,0.85);
+      text-shadow: 0 8px 32px rgba(80,145,255,0.28);
+    }
+
+    /* ══════════════════════════════════════════
+       TIMELINE VIEW
+       ══════════════════════════════════════════ */
+    #timelineView {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding:
+        calc(max(20px, env(safe-area-inset-top)) + 96px)
+        16px
+        calc(max(22px, env(safe-area-inset-bottom)) + 160px);
+    }
+    #timelineList {
+      position: relative;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+    /* Vertical spine */
+    #timelineList::before {
+      content: "";
+      position: absolute;
+      left: 96px;
+      top: 8px;
+      bottom: 8px;
+      width: 1px;
+      background: linear-gradient(to bottom,
+        transparent 0,
+        rgba(255,255,255,0.12) 12px,
+        rgba(255,255,255,0.12) calc(100% - 12px),
+        transparent 100%);
+      pointer-events: none;
+    }
+    .tl-day {
+      position: relative;
+      min-height: 80px;
+      margin-bottom: 20px;
+    }
+    .tl-date-pill {
+      position: absolute;
+      left: 0;
+      top: 14px;
+      width: 84px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: linear-gradient(to bottom, #151515, #1b1b1b);
+      border: 1px solid #252525;
+      color: rgba(255,255,255,0.55);
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .tl-entry {
+      position: relative;
+      margin-left: 120px;
+      margin-bottom: 14px;
+    }
+    .tl-entry:last-child { margin-bottom: 0; }
+    /* Connector dot on the spine */
+    .tl-entry::before {
+      content: "";
+      position: absolute;
+      left: -33px;
+      top: 18px;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #0a0a0a;
+      border: 1px solid rgba(255,255,255,0.35);
+      box-shadow: 0 0 0 3px rgba(8,18,38,0.85);
+      pointer-events: none;
+    }
+    .tl-time {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      color: rgba(255,255,255,0.35);
+      margin-bottom: 6px;
+    }
+    .tl-card {
+      border-radius: 20px;
+      background: linear-gradient(to bottom, #000000, #111111);
+      border: 1px solid #2a2a2a;
+      padding: 14px 16px;
+      cursor: pointer;
+      transition: border-color 0.25s;
+      overflow: hidden;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .tl-card:hover { border-color: #3a3a3a; }
+    .tl-card.expanded { border-color: rgba(255,255,255,0.22); }
+    .tl-card-note {
+      font-size: 13px;
+      line-height: 1.55;
+      color: rgba(255,255,255,0.75);
+      margin: 0 0 10px;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+    }
+    .tl-card-indicators {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+    .tl-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      box-shadow: 0 0 6px currentColor;
+    }
+    .tl-hint {
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.22);
+      margin-left: auto;
+    }
+    .tl-expand {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.45s cubic-bezier(0.2, 0.7, 0.1, 1);
+    }
+    .tl-expand-inner {
+      padding-top: 14px;
+      margin-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    /* Constrain the 280px built cards (from cards.js) so they can't
+       overflow narrow viewports. max-width is respected even when the
+       child sets an explicit width:280px inline style. */
+    .tl-expand-inner > div { max-width: 100%; }
+
+    @media (max-width: 480px) {
+      #timelineList::before { left: 78px; }
+      .tl-date-pill { width: 68px; font-size: 9px; padding: 4px 8px; }
+      .tl-entry { margin-left: 100px; }
+      .tl-entry::before { left: -27px; }
+    }
   </style>
 </head>
 <body>
@@ -517,14 +758,32 @@
   <!-- Fullscreen touch target -->
   <div id="touchTarget"></div>
 
+  <!-- Graph view (placeholder) -->
+  <section id="graphView">
+    <h2>GRAPH</h2>
+  </section>
+
+  <!-- Timeline view -->
+  <section id="timelineView">
+    <div id="timelineList"></div>
+  </section>
+
   <!-- Floating UI (no card, no button — just status + tools) -->
   <div class="overlay">
+    <!-- TEMP: brand header hidden for pitch-black test — keep markup for restore
     <div class="brand">
       <h1>Neron</h1>
       <p>Voice Knowledge Assistant</p>
     </div>
+    -->
 
     <div style="flex:1"></div>
+
+    <nav id="nav">
+      <button class="nav-seg" data-view="graph"    type="button">Graph</button>
+      <button class="nav-seg active" data-view="sphere" type="button">Sphere</button>
+      <button class="nav-seg" data-view="timeline" type="button">Timeline</button>
+    </nav>
 
     <div id="bottomUI">
       <div class="tools" id="tools"></div>
@@ -544,6 +803,7 @@
   <script src="voice.js"></script>
   <script src="cards.js"></script>
   <script src="recording.js"></script>
+  <script src="timeline.js"></script>
 
   <!-- tap ripple now handled by recording.js via #touchTarget -->
 
