@@ -363,7 +363,7 @@
     touchStartTime = Date.now();
     touchMoved = false;
     onDown(e);
-    e.preventDefault(); /* prevent iOS callout, speech recognition popup */
+    e.preventDefault(); /* prevent iOS long-press callout / magnifier */
   }, { passive: false });
 
   touchTarget.addEventListener('touchmove', function () {
