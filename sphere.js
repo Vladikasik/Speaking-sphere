@@ -65,12 +65,20 @@
   /* ── Resize ── */
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
-    W = window.innerWidth; H = window.innerHeight;
+    W = document.documentElement.clientWidth || window.innerWidth;
+    H = document.documentElement.clientHeight || window.innerHeight;
+    /* iOS Safari: visual viewport can be smaller than layout viewport;
+       use the larger value to prevent black strips around the canvas */
+    if (window.visualViewport) {
+      W = Math.max(W, window.visualViewport.width);
+      H = Math.max(H, window.visualViewport.height);
+    }
     canvas.width = W * dpr; canvas.height = H * dpr;
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
   }
   resize();
   window.addEventListener('resize', resize);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
   /* ── 3D projection (returns rx, ry, rz for line drawing) ── */
   function project(ox, oy, oz, rotY, rotX, rad, cx, cy) {

@@ -181,7 +181,10 @@
 
       case 'error':
         console.error('[voice] Error:', msg.error);
-        if (state === 'thinking') setState('listening');
+        if (state === 'thinking' || state === 'speaking') {
+          stopPlayback();
+          setState('listening');
+        }
         break;
 
       default:
@@ -350,15 +353,21 @@
      RESPONSE LIFECYCLE
      ════════════════════════════════════════ */
   function finishResponse() {
-    awaitPlaybackEnd();
+    awaitPlaybackEnd(0);
   }
 
-  function awaitPlaybackEnd() {
-    if (sources.length === 0) {
+  function awaitPlaybackEnd(elapsed) {
+    if (sources.length === 0 || elapsed > 15000) {
+      if (elapsed > 15000) {
+        console.warn('[voice] Playback timeout — forcing recovery');
+        stopPlayback();
+      }
+      isAiSpeaking = false;
+      if (window.kimiko) { window.kimiko._aiLevel = 0; window.kimiko._speaker = 'idle'; }
       if (state !== 'idle') setState('listening');
       setTimeout(clearTools, 1500);
     } else {
-      setTimeout(awaitPlaybackEnd, 100);
+      setTimeout(function () { awaitPlaybackEnd(elapsed + 100); }, 100);
     }
   }
 
