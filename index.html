@@ -7,9 +7,14 @@
   <meta name="theme-color" content="#000000">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <!-- ╔═══════════════════════════════════════════════════════╗
-       ║  CUSTOMIZE: Change title and brand name below        ║
-       ╚═══════════════════════════════════════════════════════╝ -->
+  <meta name="apple-mobile-web-app-title" content="Neron">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32-fix.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" sizes="167x167" href="icons/apple-touch-icon-167.png">
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/apple-touch-icon-152.png">
+  <link rel="apple-touch-icon" sizes="120x120" href="icons/apple-touch-icon-120.png">
   <title>Neron</title>
   <style>
     /* ── CUSTOMIZATION TOKENS ──
@@ -470,6 +475,7 @@
     #bottomUI {
       text-align: center;
       pointer-events: none;
+      margin-bottom: 6px;
     }
 
     /* ── Mic button active state (status pill now) ── */
@@ -515,8 +521,8 @@
     body:not([data-view="sphere"]) #sphereCanvas,
     body:not([data-view="sphere"]) #touchTarget { display: none; }
 
-    /* Hide the "Hold to record" hint on non-sphere views (status pill stays) */
-    body:not([data-view="sphere"]) .ver { visibility: hidden; }
+    /* Status pills, tools, and hints are sphere-only */
+    body:not([data-view="sphere"]) #bottomUI { display: none; }
 
     /* ── 3-segment liquid-glass nav pill ──
        The overlay's z-index (3) is what actually lifts this above #touchTarget.
@@ -524,48 +530,43 @@
     #nav {
       display: flex;
       align-items: stretch;
-      gap: 0;
-      padding: 4px;
-      margin: 0 auto 4px;
-      width: min(320px, 88%);
-      border: 1px solid var(--glass-border);
-      border-radius: 16px;
-      background:
-        linear-gradient(136deg, rgba(255,255,255,0.16), rgba(255,255,255,0.04) 48%, rgba(255,255,255,0.01)),
-        var(--glass-bg);
-      box-shadow:
-        0 10px 24px rgba(0,6,18,0.4),
-        inset 0 1px 0 rgba(255,255,255,0.42),
-        inset 0 -1px 0 rgba(255,255,255,0.08);
-      backdrop-filter: blur(20px) saturate(170%);
-      -webkit-backdrop-filter: blur(20px) saturate(170%);
+      gap: 10px;
+      padding: 5px;
+      margin: 0 auto;
+      width: min(170px, 46%);
+      border: 1px solid #2a2a2a;
+      border-radius: 14px;
+      background: linear-gradient(to bottom, #0a0a0a, #141414);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.5);
       pointer-events: auto;
     }
     .nav-seg {
       flex: 1;
-      height: 34px;
+      aspect-ratio: 1;
       border: 0;
-      border-radius: 12px;
+      border-radius: 11px;
       background: transparent;
-      color: rgba(200,220,248,0.55);
-      font-family: inherit;
-      font-size: 11px;
-      font-weight: 540;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
       cursor: pointer;
-      transition: background 0.25s, color 0.25s, box-shadow 0.25s;
+      transition: background 0.25s, box-shadow 0.25s;
       -webkit-tap-highlight-color: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
     }
     .nav-seg.active {
-      background: linear-gradient(136deg, rgba(255,255,255,0.22), rgba(255,255,255,0.06) 52%, rgba(255,255,255,0.01));
-      color: var(--text);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.42),
-        inset 0 -1px 0 rgba(255,255,255,0.08),
-        0 2px 8px rgba(0,6,18,0.3);
+      background: linear-gradient(to bottom, #1a1a1a, #222222);
+      border: 1px solid #333;
     }
-    .nav-seg:hover:not(.active) { color: rgba(230,242,255,0.85); }
+    .nav-icon {
+      width: 18px;
+      height: 18px;
+      opacity: 0.35;
+      transition: opacity 0.25s;
+      pointer-events: none;
+    }
+    .nav-seg.active .nav-icon { opacity: 0.85; }
+    .nav-seg:hover:not(.active) .nav-icon { opacity: 0.55; }
 
     /* ── Graph view (placeholder) ── */
     #graphView {
@@ -782,12 +783,6 @@
 
     <div style="flex:1"></div>
 
-    <nav id="nav">
-      <button class="nav-seg" data-view="graph"    type="button">Graph</button>
-      <button class="nav-seg active" data-view="sphere" type="button">Sphere</button>
-      <button class="nav-seg" data-view="timeline" type="button">Timeline</button>
-    </nav>
-
     <div id="bottomUI">
       <div class="tools" id="tools"></div>
       <div class="pills">
@@ -795,6 +790,12 @@
       </div>
       <div class="ver">Hold to record a note</div>
     </div>
+
+    <nav id="nav">
+      <button class="nav-seg" data-view="graph"    type="button"><img src="graph.png" alt="Graph" class="nav-icon"></button>
+      <button class="nav-seg active" data-view="sphere" type="button"><img src="sphere.png" alt="Sphere" class="nav-icon"></button>
+      <button class="nav-seg" data-view="timeline" type="button"><img src="timeline.png" alt="Timeline" class="nav-icon"></button>
+    </nav>
   </div>
 
   <!-- Hidden mic button (voice.js binds to it, we trigger it programmatically) -->
