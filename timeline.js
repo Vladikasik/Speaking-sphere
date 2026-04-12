@@ -300,6 +300,12 @@
       nav.querySelectorAll('.nav-seg').forEach(function (s) {
         s.classList.toggle('active', s === btn);
       });
+      /* Leaving the sphere view → mute the voice so the agent isn't left
+         "always listening" while the user is reading the timeline or the
+         graph. Stays muted on return — user taps the sphere to resume. */
+      if (v !== 'sphere' && window.neron && window.neron.muteVoice) {
+        window.neron.muteVoice();
+      }
     });
   }
 

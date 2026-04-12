@@ -71,6 +71,13 @@
   function enterRecording() {
     setState('recording');
 
+    /* If the voice was soft-muted (via short-tap or nav switch), force it
+       open for the duration of the recording — otherwise the worklet
+       would drop every frame and nothing would reach the server. */
+    if (window.neron.isMuted && window.neron.isMuted() && window.neron.unmuteVoice) {
+      window.neron.unmuteVoice();
+    }
+
     /* Suppress any Grok responses during recording */
     window.neron._suppressResponse = true;
     /* Disable VAD so xAI doesn't auto-respond, but audio still flows */
@@ -350,6 +357,23 @@
     }
   }
 
+  /* Handle a detected short tap (press+release < 400ms, no drag).
+     Two outcomes:
+     - if we're actively recording, stop and process the note
+     - if we just bailed out of a pressing state (i.e. didn't reach the 3s
+       hold threshold), toggle the voice mute so a single tap flips
+       between "listening" and "muted" idle. */
+  function handleShortTap(elapsed, moved, wasPressing) {
+    if (moved || elapsed >= 400) return;
+    if (recState === 'recording') {
+      stopAndProcess();
+      return;
+    }
+    if (wasPressing && recState === 'idle') {
+      if (window.neron && window.neron.toggleMute) window.neron.toggleMute();
+    }
+  }
+
   function onCancel() {
     if (recState === 'pressing') cancelPressing();
   }
@@ -372,14 +396,10 @@
 
   touchTarget.addEventListener('touchend', function (e) {
     var elapsed = Date.now() - touchStartTime;
+    var wasPressing = recState === 'pressing';
     onUp(e);
 
-    /* Detect tap: quick touch without moving */
-    if (!touchMoved && elapsed < 400 && recState === 'recording') {
-      /* This was a fresh tap while recording — use a slight delay to
-         distinguish from the release of the initial long-press */
-      stopAndProcess();
-    }
+    handleShortTap(elapsed, touchMoved, wasPressing);
 
     /* Reset touch flag after a tick (so pointer events don't double-fire) */
     setTimeout(function () { touchActive = false; }, 100);
@@ -403,11 +423,10 @@
   touchTarget.addEventListener('pointerup', function (e) {
     if (touchActive) return;
     var elapsed = Date.now() - pointerDownTime;
+    var wasPressing = recState === 'pressing';
     onUp(e);
 
-    if (elapsed < 400 && recState === 'recording') {
-      stopAndProcess();
-    }
+    handleShortTap(elapsed, false, wasPressing);
   });
 
   touchTarget.addEventListener('pointercancel', function () {

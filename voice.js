@@ -16,6 +16,16 @@
   var nextPlayTime = 0;
   var sources = [];
   var state = 'idle';
+  /* Soft-mute: WS stays connected, mic stream stays open, but the worklet
+     stops forwarding PCM frames and stops writing _micLevel. Flipped on/off
+     via window.neron.muteVoice / unmuteVoice / toggleMute. */
+  var isMuted = false;
+  /* AnalyserNode sits between every AI BufferSourceNode and audioCtx.destination.
+     One rAF loop reads getByteFrequencyData per frame and writes the live
+     avg/255 value into window.kimiko._aiLevel — so the outer sphere tracks
+     what's AUDIBLE right now, not what was just decoded. */
+  var aiAnalyser = null;
+  var aiLevelBins = null;
 
   /* ── Recording mode API ── */
   window.neron = window.neron || {};
@@ -264,6 +274,13 @@
       var worklet = new AudioWorkletNode(audioCtx, 'pcm16');
 
       worklet.port.onmessage = function (e) {
+        /* Soft-muted: drop the frame entirely, pin the visible mic level to 0
+           so the inner sphere goes quiet. */
+        if (isMuted) {
+          if (window.kimiko) window.kimiko._micLevel = 0;
+          return;
+        }
+
         var rms = e.data.r;
         if (window.kimiko) window.kimiko._micLevel = Math.min(1, rms * 4);
 
@@ -297,23 +314,27 @@
     if (!b64) return;
     if (!audioCtx) audioCtx = new AudioContext({ sampleRate: RATE });
 
+    /* Lazy-create the analyser the first time we play AI audio. */
+    if (!aiAnalyser) {
+      aiAnalyser = audioCtx.createAnalyser();
+      aiAnalyser.fftSize = 256;
+      aiAnalyser.smoothingTimeConstant = 0.2;
+      aiAnalyser.connect(audioCtx.destination);
+      aiLevelBins = new Uint8Array(aiAnalyser.frequencyBinCount);
+    }
+
     var bin = atob(b64);
     var bytes = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     var int16 = new Int16Array(bytes.buffer);
 
     var f32 = new Float32Array(int16.length);
-    var sum = 0;
-    for (var i = 0; i < int16.length; i++) {
-      f32[i] = int16[i] / 32768;
-      sum += f32[i] * f32[i];
-    }
+    for (var i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
 
-    var rms = Math.sqrt(sum / f32.length);
-    if (window.kimiko) {
-      window.kimiko._aiLevel = Math.min(1, rms * 5);
-      window.kimiko._speaker = 'ai';
-    }
+    /* _aiLevel is driven by the per-frame analyser loop below — do NOT set
+       it from chunk RMS here. The old path froze the value after all chunks
+       finished decoding but before they finished playing.                    */
+    if (window.kimiko) window.kimiko._speaker = 'ai';
     isAiSpeaking = true;
 
     var buf = audioCtx.createBuffer(1, f32.length, RATE);
@@ -321,7 +342,7 @@
 
     var node = audioCtx.createBufferSource();
     node.buffer = buf;
-    node.connect(audioCtx.destination);
+    node.connect(aiAnalyser);
 
     var now = audioCtx.currentTime;
     if (nextPlayTime < now) nextPlayTime = now + 0.05;
@@ -375,12 +396,13 @@
      UI STATE
      ════════════════════════════════════════ */
   var stateMap = {
-    idle:       ['Tap to connect', '',   'Start Conversation', false],
-    connecting: ['Connecting\u2026',    '',   'Connecting\u2026',        false],
-    ready:      ['Connected',      'on', 'Ready',              false],
-    listening:  ['Listening',      'on', 'Listening\u2026',         true],
-    thinking:   ['Thinking\u2026',      '',   'Processing\u2026',       true],
-    speaking:   ['Speaking',       'on', 'AI Speaking\u2026',       true]
+    idle:       ['Tap to connect',        '',   'Start Conversation', false],
+    connecting: ['Connecting\u2026',      '',   'Connecting\u2026',    false],
+    ready:      ['Connected',             'on', 'Ready',               false],
+    listening:  ['Listening',             'on', 'Listening\u2026',     true],
+    thinking:   ['Thinking\u2026',        '',   'Processing\u2026',    true],
+    speaking:   ['Speaking',              'on', 'AI Speaking\u2026',   true],
+    muted:      ['Muted \u00b7 tap to listen', '', 'Muted',            false]
   };
 
   function setState(s) {
@@ -399,6 +421,10 @@
     stopPlayback();
     if (audioCtx) { try { audioCtx.close(); } catch (e) {} }
     audioCtx = null;
+    /* Analyser is bound to the closed audioCtx — drop it so the next
+       playChunk after a reconnect lazily builds a fresh one on the new ctx. */
+    aiAnalyser = null;
+    aiLevelBins = null;
   }
 
   /* ════════════════════════════════════════
@@ -458,6 +484,37 @@
   window.neron.stopAiPlayback = function() { stopPlayback(); };
   window.neron.connect = connect;
 
+  /* ── Mute API ──
+     muteVoice: stop sending mic audio to the server, pin _micLevel to 0,
+                disable server VAD, wipe any buffered audio, cut off any
+                currently-playing AI reply, put UI into 'muted' state.
+     unmuteVoice: flip back to normal listening (re-enables VAD).
+     toggleMute: the one recording.js and the nav switcher call. */
+  window.neron.muteVoice = function() {
+    if (state === 'muted') return;
+    isMuted = true;
+    if (isAiSpeaking) stopPlayback();
+    if (window.neron.setVAD) window.neron.setVAD(false);
+    if (window.neron.clearAudioBuffer) window.neron.clearAudioBuffer();
+    if (window.kimiko) {
+      window.kimiko._micLevel = 0;
+      window.kimiko._aiLevel = 0;
+      window.kimiko._speaker = 'idle';
+    }
+    setState('muted');
+  };
+  window.neron.unmuteVoice = function() {
+    if (!isMuted && state !== 'muted') return;
+    isMuted = false;
+    if (window.neron.setVAD) window.neron.setVAD(true);
+    setState('listening');
+  };
+  window.neron.toggleMute = function() {
+    if (state === 'muted' || isMuted) window.neron.unmuteVoice();
+    else window.neron.muteVoice();
+  };
+  window.neron.isMuted = function() { return isMuted; };
+
   /* ── Button (hidden, triggered programmatically) ── */
   if (micBtn) {
     micBtn.addEventListener('click', function () {
@@ -468,11 +525,18 @@
   /* ── Auto-connect on page load ── */
   connect();
 
-  /* ── Smooth AI level decay ── */
-  (function decay() {
-    if (window.kimiko && !isAiSpeaking && window.kimiko._aiLevel > 0.01)
-      window.kimiko._aiLevel *= 0.85;
-    requestAnimationFrame(decay);
+  /* ── Live AI level loop ──
+     Reads the AnalyserNode every rAF frame, averages the frequency bins,
+     normalises to 0..1, and writes window.kimiko._aiLevel. When nothing
+     is playing through the analyser the bins are ~0, so the level decays
+     naturally — no manual decay needed. */
+  (function readAiLevel() {
+    requestAnimationFrame(readAiLevel);
+    if (!aiAnalyser || !aiLevelBins || !window.kimiko) return;
+    aiAnalyser.getByteFrequencyData(aiLevelBins);
+    var s = 0;
+    for (var i = 0; i < aiLevelBins.length; i++) s += aiLevelBins[i];
+    window.kimiko._aiLevel = (s / aiLevelBins.length) / 255;
   })();
 
 })();
