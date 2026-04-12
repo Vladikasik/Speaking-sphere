@@ -65,16 +65,17 @@
   /* ── Resize ── */
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
-    W = document.documentElement.clientWidth || window.innerWidth;
-    H = document.documentElement.clientHeight || window.innerHeight;
-    /* iOS Safari: visual viewport can be smaller than layout viewport;
-       use the larger value to prevent black strips around the canvas */
-    if (window.visualViewport) {
-      W = Math.max(W, window.visualViewport.width);
-      H = Math.max(H, window.visualViewport.height);
-    }
-    canvas.width = W * dpr; canvas.height = H * dpr;
-    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    /* Read the size the CSS box model already gave us (position:fixed;
+       inset:0 with viewport-fit=cover = the full physical screen including
+       safe areas). Previous code read clientHeight / visualViewport.height
+       and wrote them back as inline styles, but those values can be shorter
+       than the full screen on iOS — leaving a gap at the bottom. By using
+       getBoundingClientRect on the CSS-sized element we get the real size. */
+    var rect = canvas.getBoundingClientRect();
+    W = rect.width;
+    H = rect.height;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
   }
   resize();
   window.addEventListener('resize', resize);
